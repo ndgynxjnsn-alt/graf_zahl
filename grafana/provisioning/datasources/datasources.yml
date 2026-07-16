@@ -1,0 +1,71 @@
+apiVersion: 1
+
+datasources:
+  # ---- Metrics (Mimir, Prometheus-compatible) ----
+  - name: Mimir
+    uid: mimir
+    type: prometheus
+    access: proxy
+    url: http://mimir:9009/prometheus
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      manageAlerts: false
+      prometheusType: Mimir
+      # Turn metric exemplars into clickable links to Tempo traces.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+          urlDisplayLabel: "View trace"
+
+  # ---- Traces (Tempo) ----
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # Dashboard trace-search panels stream results over Grafana Live; Tempo
+      # serves that because stream_over_http_enabled is on in tempo-config.yml.
+      streamingEnabled:
+        search: true
+        metrics: true
+      # Trace span -> jump to correlated logs in Loki
+      tracesToLogsV2:
+        datasourceUid: loki
+        filterByTraceID: true
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+      # Trace span -> related RED metrics in Mimir
+      tracesToMetrics:
+        datasourceUid: mimir
+      serviceMap:
+        datasourceUid: mimir
+      nodeGraph:
+        enabled: true
+      tracesToProfiles:
+        datasourceUid: pyroscope
+        profileTypeId: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
+
+  # ---- Logs (Loki) ----
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # trace_id arrives as OTLP structured metadata -> link it to Tempo.
+      derivedFields:
+        - name: trace_id
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: "${__value.raw}"
+          urlDisplayLabel: "View trace"
+
+  # ---- Profiles (Pyroscope) ----
+  - name: Pyroscope
+    uid: pyroscope
+    type: grafana-pyroscope-datasource
+    access: proxy
+    url: http://pyroscope:4040

@@ -1,0 +1,177 @@
+# Grafana observability showcase: logs + metrics + traces + profiles.
+#
+#   app (Spring Boot)  --OTLP-->  Alloy  -->  Loki  (logs)
+#                                          -->  Tempo (traces)
+#                                          -->  Mimir (metrics + exemplars)
+#   app (Pyroscope agent) --------------->  Pyroscope (profiles)
+#   Grafana reads all four. k6 generates load.
+#
+# The Spring Boot app runs twice, in the "production" and "test" environments.
+
+name: graf-zahl
+
+# Shared config for the two app instances. Only ENVIRONMENT-derived values differ.
+x-app-common: &app-common
+  build: ./app
+  restart: unless-stopped
+  depends_on:
+    - alloy
+    - pyroscope
+  environment: &app-common-env
+    # ---- OpenTelemetry: push everything to Alloy over OTLP/HTTP ----
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    OTEL_LOGS_EXPORTER: otlp
+    OTEL_METRICS_EXPORTER: otlp
+    OTEL_TRACES_EXPORTER: otlp
+    OTEL_METRIC_EXPORT_INTERVAL: "5000"
+    OTEL_METRICS_EXEMPLAR_FILTER: trace_based
+    # Classic (bucketed) histograms so quantiles + exemplars are easy to graph.
+    OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: explicit_bucket_histogram
+    # Bridge Micrometer meters (incl. the app's custom metrics) into the OTel SDK.
+    OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
+    # ---- Pyroscope agent: push profiles straight to Pyroscope ----
+    PYROSCOPE_APPLICATION_NAME: graf-zahl-demo
+    PYROSCOPE_SERVER_ADDRESS: http://pyroscope:4040
+    PYROSCOPE_FORMAT: jfr
+    PYROSCOPE_PROFILER_EVENT: itimer
+    PYROSCOPE_PROFILER_ALLOC: 512k
+    PYROSCOPE_PROFILER_LOCK: 10ms
+    PYROSCOPE_LOG_LEVEL: info
+
+services:
+  # ----------------------------------------------------------------------
+  # Application, one container per environment
+  # ----------------------------------------------------------------------
+  app-production:
+    <<: *app-common
+    container_name: app-production
+    environment:
+      <<: *app-common-env
+      ENVIRONMENT: production
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=production"
+      PYROSCOPE_LABELS: "environment=production"
+    ports:
+      - "8081:8080"
+
+  app-test:
+    <<: *app-common
+    container_name: app-test
+    environment:
+      <<: *app-common-env
+      ENVIRONMENT: test
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=test"
+      PYROSCOPE_LABELS: "environment=test"
+    ports:
+      - "8082:8080"
+
+  # ----------------------------------------------------------------------
+  # Grafana Alloy: single OTLP collector, fans out to the backends
+  # ----------------------------------------------------------------------
+  alloy:
+    image: grafana/alloy:v1.17.1
+    container_name: alloy
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    ports:
+      - "12345:12345" # Alloy UI (host ports remapped to avoid clashing
+                      # with a pre-existing "showcase" stack on 3000/3100/etc.)
+    depends_on:
+      - loki
+      - tempo
+      - mimir
+
+  # ----------------------------------------------------------------------
+  # Backends (all single-tenant)
+  # ----------------------------------------------------------------------
+  loki:
+    image: grafana/loki:3.7.3
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "13100:3100"
+
+  tempo:
+    image: grafana/tempo:2.10.7
+    container_name: tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo-config.yml
+    volumes:
+      - ./tempo/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "13200:3200"
+
+  mimir:
+    image: grafana/mimir:3.1.3
+    container_name: mimir
+    restart: unless-stopped
+    command: -config.file=/etc/mimir/mimir-config.yml
+    volumes:
+      - ./mimir/mimir-config.yml:/etc/mimir/mimir-config.yml:ro
+      - mimir-data:/data
+    ports:
+      - "19009:9009"
+
+  pyroscope:
+    image: grafana/pyroscope:1.21.1
+    container_name: pyroscope
+    restart: unless-stopped
+    volumes:
+      - pyroscope-data:/data
+    ports:
+      - "14040:4040"
+
+  # ----------------------------------------------------------------------
+  # Grafana
+  # ----------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:12.2.10
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_FEATURE_TOGGLES_ENABLE: traceToProfiles
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "13000:3000"
+    depends_on:
+      - loki
+      - tempo
+      - mimir
+      - pyroscope
+
+  # ----------------------------------------------------------------------
+  # Load generator
+  # ----------------------------------------------------------------------
+  k6:
+    image: grafana/k6:1.8.0
+    container_name: k6
+    restart: unless-stopped
+    command: run /scripts/script.js
+    volumes:
+      - ./k6/script.js:/scripts/script.js:ro
+    depends_on:
+      - app-production
+      - app-test
+
+volumes:
+  loki-data:
+  tempo-data:
+  mimir-data:
+  pyroscope-data:
+  grafana-data:

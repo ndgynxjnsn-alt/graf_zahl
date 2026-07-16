@@ -1,0 +1,24 @@
+spring:
+  application:
+    # Becomes the OpenTelemetry service.name -> shows up as `service_name`
+    # in Loki / Mimir and as `service.name` in Tempo.
+    name: graf-zahl-demo
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Keep the console log readable and surface the trace id that the
+# OpenTelemetry Logback MDC instrumentation injects.
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [trace_id=%X{trace_id:-none}] %logger{20} - %msg%n"
