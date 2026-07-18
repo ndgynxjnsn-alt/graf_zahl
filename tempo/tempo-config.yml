@@ -1,4 +1,9 @@
-# Tempo 3.x monolithic, single tenant (multitenancy disabled by default).
+# Tempo 3.x monolithic (-target=all), single tenant (multitenancy disabled).
+#
+# Tempo 3.0 changed its architecture: in monolithic mode the distributor pushes
+# spans in-process to the live-store (which serves recent queries, builds blocks
+# and handles retention) and to the metrics-generator. No Kafka, no ingest /
+# block_builder / compactor blocks are needed.
 stream_over_http_enabled: true
 
 server:
@@ -15,15 +20,8 @@ distributor:
         grpc:
           endpoint: 0.0.0.0:4317
 
-ingester:
-  max_block_duration: 5m
-
-compactor:
-  compaction:
-    block_retention: 24h
-
 # Generate span metrics + service graphs and remote-write them to Mimir,
-# so exemplars and RED metrics have somewhere to land.
+# so RED metrics and exemplars have somewhere to land.
 metrics_generator:
   registry:
     external_labels:
@@ -33,8 +31,6 @@ metrics_generator:
     remote_write:
       - url: http://mimir:9009/api/v1/push
         send_exemplars: true
-  traces_storage:
-    path: /var/tempo/generator/traces
 
 storage:
   trace:

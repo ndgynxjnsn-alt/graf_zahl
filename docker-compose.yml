@@ -79,8 +79,7 @@ services:
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
     ports:
-      - "12345:12345" # Alloy UI (host ports remapped to avoid clashing
-                      # with a pre-existing "showcase" stack on 3000/3100/etc.)
+      - "12345:12345" # Alloy UI
     depends_on:
       - loki
       - tempo
@@ -98,10 +97,10 @@ services:
       - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
     ports:
-      - "13100:3100"
+      - "3100:3100"
 
   tempo:
-    image: grafana/tempo:2.10.7
+    image: grafana/tempo:3.0.2
     container_name: tempo
     restart: unless-stopped
     command: -config.file=/etc/tempo/tempo-config.yml
@@ -109,7 +108,7 @@ services:
       - ./tempo/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
       - tempo-data:/var/tempo
     ports:
-      - "13200:3200"
+      - "3200:3200"
 
   mimir:
     image: grafana/mimir:3.1.3
@@ -120,22 +119,22 @@ services:
       - ./mimir/mimir-config.yml:/etc/mimir/mimir-config.yml:ro
       - mimir-data:/data
     ports:
-      - "19009:9009"
+      - "9009:9009"
 
   pyroscope:
-    image: grafana/pyroscope:1.21.1
+    image: grafana/pyroscope:2.1.1
     container_name: pyroscope
     restart: unless-stopped
     volumes:
       - pyroscope-data:/data
     ports:
-      - "14040:4040"
+      - "4040:4040"
 
   # ----------------------------------------------------------------------
   # Grafana
   # ----------------------------------------------------------------------
   grafana:
-    image: grafana/grafana:12.2.10
+    image: grafana/grafana:13.1.0
     container_name: grafana
     restart: unless-stopped
     environment:
@@ -148,7 +147,7 @@ services:
       - ./grafana/dashboards:/etc/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "13000:3000"
+      - "3000:3000"
     depends_on:
       - loki
       - tempo
@@ -159,7 +158,7 @@ services:
   # Load generator
   # ----------------------------------------------------------------------
   k6:
-    image: grafana/k6:1.8.0
+    image: grafana/k6:2.1.0
     container_name: k6
     restart: unless-stopped
     command: run /scripts/script.js

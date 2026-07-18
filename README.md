@@ -43,23 +43,24 @@ docker compose up -d --build
 
 Then open Grafana → dashboard **“Graf Zahl — Observability Showcase”**:
 
-- http://localhost:13000 (anonymous admin, no login)
+- http://localhost:3000 (anonymous admin, no login)
 
 Use the **Environment** dropdown at the top to switch between `production` and `test`.
 k6 generates continuous load, so data appears within ~15 seconds.
 
-### Ports
+Grafana's **Drilldown** apps (Logs, Traces, Metrics, Profiles) are bundled with
+Grafana 13 and work out of the box against these datasources:
+http://localhost:3000/drilldown
 
-Host ports are offset (13xxx/19xxx/14xxx) to avoid clashing with anything already
-running on the standard ports.
+### Ports
 
 | Service    | URL                          |
 |------------|------------------------------|
-| Grafana    | http://localhost:13000       |
-| Mimir      | http://localhost:19009       |
-| Loki       | http://localhost:13100       |
-| Tempo      | http://localhost:13200       |
-| Pyroscope  | http://localhost:14040       |
+| Grafana    | http://localhost:3000        |
+| Mimir      | http://localhost:9009        |
+| Loki       | http://localhost:3100        |
+| Tempo      | http://localhost:3200        |
+| Pyroscope  | http://localhost:4040        |
 | Alloy UI   | http://localhost:12345       |
 | app (prod) | http://localhost:8081        |
 | app (test) | http://localhost:8082        |
@@ -103,4 +104,10 @@ k6/script.js                  # load generator
 ## Versions
 
 Java 21, Spring Boot 3.5.16, OpenTelemetry instrumentation BOM 2.16.0,
-Grafana 12.2, Loki 3.7, Tempo 2.10, Mimir 3.1, Pyroscope 1.21, Alloy 1.17, k6 1.8.
+Grafana 13.1, Loki 3.7, Tempo 3.0, Mimir 3.1, Pyroscope 2.1, Alloy 1.17, k6 2.1.
+
+> Tempo 3.0 runs in **monolithic mode** (`-target=all`) — its new architecture
+> only needs Kafka for microservices deployments. In-process, the distributor
+> pushes spans straight to the live-store (recent-query serving, block building
+> and retention) and the metrics-generator, so no `ingester` / `compactor` /
+> `ingest` blocks appear in `tempo/tempo-config.yml`.
