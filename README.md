@@ -124,3 +124,6 @@ Grafana 13.1, Loki 3.7, Tempo 3.0, Mimir 3.1, Pyroscope 2.1, Alloy 1.17, k6 2.1.
 > pushes spans straight to the live-store (recent-query serving, block building
 > and retention) and the metrics-generator, so no `ingester` / `compactor` /
 > `ingest` blocks appear in `tempo/tempo-config.yml`.
+
+
+https://share.gemini.google/Zl2x6XFsrnlo
