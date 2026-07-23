@@ -24,8 +24,15 @@ and continuous profiling** for a Java 21 / Spring Boot 3.5 application — all p
   [`opentelemetry-spring-boot-starter`](https://opentelemetry.io/docs/zero-code/java/spring-boot-starter/)
   exports traces, metrics and logs over OTLP to Alloy. Micrometer meters (including
   the app's custom metrics) are bridged into the OTel SDK. No Prometheus scraping.
-- **Profiling** via the Grafana Pyroscope Java agent (`-javaagent`), pushed straight
-  to Pyroscope.
+- **Profiling** via the Grafana Pyroscope Java agent (`-javaagent`), pushed to
+  **Alloy** (`pyroscope.receive_http`), which relays to Pyroscope
+  (`pyroscope.write`) — so every signal, profiles included, flows through Alloy.
+- **Trace ↔ profile correlation** via
+  [`grafana/otel-profiling-java`](https://github.com/grafana/otel-profiling-java)
+  (`io.pyroscope:otel`): its `AutoConfigurationCustomizerProvider` is registered
+  as a bean, so the OTel SDK stamps each profile with the active span
+  (`span_name`, and Pyroscope's span-profile linkage). Profiles become
+  filterable per span, and a Tempo span links to its flame graph.
 - **Exemplars** — the request-latency histogram carries `trace_id` exemplars; click a
   ◆ on the latency panel to jump to the trace in Tempo.
 - **Logs → traces** — log lines carry the `trace_id` as OTLP structured metadata; the
@@ -98,8 +105,14 @@ k6/script.js                  # load generator
 - **Resource-attribute promotion:** Mimir promotes `service.name` and
   `deployment.environment` to metric labels (`service_name`, `deployment_environment`)
   so the dashboard can filter on them. Loki promotes them automatically.
-- **App → Pyroscope:** the Java agent pushes to `http://pyroscope:4040`, tagged with
-  `environment=<env>`; the app name becomes the Pyroscope `service_name`.
+- **App → Alloy → Pyroscope:** the Java agent pushes profiles to Alloy
+  (`http://alloy:9999`, `pyroscope.receive_http`), which forwards them to
+  Pyroscope (`pyroscope.write`). Profiles are tagged with `environment=<env>`;
+  the app name becomes the Pyroscope `service_name`.
+- **Span profiles:** `io.pyroscope:otel` bridges to the Pyroscope agent's
+  profiler (so `otel.pyroscope.start.profiling=false` — the agent, not the lib,
+  runs the profiler) and adds span labels. Query a flame graph scoped to a span,
+  e.g. `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="graf-zahl-demo", span_name="GET"}`.
 
 ## Versions
 

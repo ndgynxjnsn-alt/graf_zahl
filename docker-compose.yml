@@ -30,9 +30,15 @@ x-app-common: &app-common
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: explicit_bucket_histogram
     # Bridge Micrometer meters (incl. the app's custom metrics) into the OTel SDK.
     OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
-    # ---- Pyroscope agent: push profiles straight to Pyroscope ----
+    # ---- otel-profiling-java: tag profiles with trace_id / span_id ----
+    # The javaagent already runs the profiler, so don't let the lib start a
+    # second one. Label root spans and include the span name.
+    OTEL_PYROSCOPE_START_PROFILING: "false"
+    OTEL_PYROSCOPE_ROOT_SPAN_ONLY: "true"
+    OTEL_PYROSCOPE_ADD_SPAN_NAME: "true"
+    # ---- Pyroscope agent: push profiles to Alloy, which relays to Pyroscope ----
     PYROSCOPE_APPLICATION_NAME: graf-zahl-demo
-    PYROSCOPE_SERVER_ADDRESS: http://pyroscope:4040
+    PYROSCOPE_SERVER_ADDRESS: http://alloy:9999
     PYROSCOPE_FORMAT: jfr
     PYROSCOPE_PROFILER_EVENT: itimer
     PYROSCOPE_PROFILER_ALLOC: 512k
@@ -80,6 +86,7 @@ services:
       - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
     ports:
       - "12345:12345" # Alloy UI
+      - "9999:9999"   # Pyroscope profile ingest (agent -> Alloy)
     depends_on:
       - loki
       - tempo

@@ -57,6 +57,19 @@
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-spring-boot-starter</artifactId>
         </dependency>
+
+        <!--
+          grafana/otel-profiling-java: annotates Pyroscope profiles with the
+          active trace_id / span_id so a Tempo span links straight to its
+          flame graph. It bridges to the Pyroscope javaagent's ProfilerSdk at
+          runtime and self-registers a SpanProcessor via an
+          AutoConfigurationCustomizerProvider (wired as a bean below).
+        -->
+        <dependency>
+            <groupId>io.pyroscope</groupId>
+            <artifactId>otel</artifactId>
+            <version>1.0.4</version>
+        </dependency>
     </dependencies>
 
     <build>
