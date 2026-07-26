@@ -20,23 +20,31 @@ and continuous profiling** for a Java 21 / Spring Boot 3.5 application — all p
 
 - **One Spring Boot app, run twice** — `production` and `test`, selected via the
   `ENVIRONMENT` variable in `docker-compose.yml`.
-- **OpenTelemetry, push only.** The official
-  [`opentelemetry-spring-boot-starter`](https://opentelemetry.io/docs/zero-code/java/spring-boot-starter/)
-  exports traces, metrics and logs over OTLP to Alloy. Micrometer meters (including
-  the app's custom metrics) are bridged into the OTel SDK. No Prometheus scraping.
-- **Profiling** via the Grafana Pyroscope Java agent (`-javaagent`), pushed to
-  **Alloy** (`pyroscope.receive_http`), which relays to Pyroscope
-  (`pyroscope.write`) — so every signal, profiles included, flows through Alloy.
-- **Trace ↔ profile correlation** via
-  [`grafana/otel-profiling-java`](https://github.com/grafana/otel-profiling-java)
-  (`io.pyroscope:otel`): its `AutoConfigurationCustomizerProvider` is registered
-  as a bean, so the OTel SDK stamps each profile with the active span
-  (`span_name`, and Pyroscope's span-profile linkage). Profiles become
-  filterable per span, and a Tempo span links to its flame graph.
+- **OpenTelemetry, push only.** The
+  [OpenTelemetry Java agent](https://opentelemetry.io/docs/zero-code/java/agent/)
+  (the OTel-recommended zero-code approach) auto-instruments the app and exports
+  traces, metrics and logs over OTLP to Alloy. Micrometer meters (including the
+  app's custom metrics) are bridged automatically. No app-side OTel dependencies,
+  no Prometheus scraping. The agent is attached via `JAVA_TOOL_OPTIONS`, so the
+  Dockerfile entrypoint stays a plain `java -jar`.
+- **Profiling & trace ↔ profile correlation** via
+  [`grafana/otel-profiling-java`](https://github.com/grafana/otel-profiling-java),
+  loaded as an **OTel agent extension** (`-Dotel.javaagent.extensions`). It bundles
+  the Pyroscope profiler *and* stamps each profile with the active span
+  (`span_name` + Pyroscope span-profile linkage) — one extension, no separate
+  Pyroscope agent. Profiles are filterable per span, and a Tempo span links to its
+  flame graph.
+- **Everything through Alloy.** Profiles are pushed to Alloy
+  (`pyroscope.receive_http`), which relays to Pyroscope (`pyroscope.write`), so
+  logs, metrics, traces *and* profiles all flow through Alloy.
 - **Exemplars** — the request-latency histogram carries `trace_id` exemplars; click a
   ◆ on the latency panel to jump to the trace in Tempo.
-- **Logs → traces** — log lines carry the `trace_id` as OTLP structured metadata; the
-  Loki datasource turns it into a clickable link to Tempo.
+- **Logs ↔ traces** — log lines carry the `trace_id` (OTLP structured metadata); the
+  Loki datasource links it to Tempo, and Tempo's **Traces → Logs** puts a button on
+  every span that runs `{service_name="graf-zahl-demo"} | trace_id="<id>"`.
+- **Metrics → profiles** — the request-rate and JVM-memory panels have a data link
+  that opens the Pyroscope flame graph for the selected `$environment` over the
+  panel's time range. Click a CPU/throughput spike, see what caused it.
 - **`service_name`** — comes straight from `spring.application.name` (`graf-zahl-demo`)
   and appears as a label on logs and metrics and as `service.name` on traces.
 - **Single tenant** everywhere (Loki `auth_enabled: false`, Mimir
@@ -96,8 +104,13 @@ k6/script.js                  # load generator
 
 ## How the pieces connect
 
-- **App → Alloy:** `OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318` (OTLP/HTTP).
-  `OTEL_RESOURCE_ATTRIBUTES=deployment.environment=<env>` tags every signal.
+- **Minimal app config.** Almost everything is an OTel agent default, so the app
+  only sets two OTel vars: `OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318`
+  (http/protobuf is the agent default) and
+  `OTEL_RESOURCE_ATTRIBUTES=deployment.environment=<env>`. `otlp` exporters,
+  `trace_based` exemplars, cumulative bucketed histograms and the Micrometer
+  bridge are all on by default; `service.name` is auto-detected from
+  `spring.application.name`.
 - **Alloy → backends:** one `otelcol.receiver.otlp` → `batch` → three `otlphttp`
   exporters (Tempo `:4318`, Loki `/otlp`, Mimir `/otlp`).
 - **Exemplars:** Mimir has `max_global_exemplars_per_user` enabled; the Grafana Mimir
@@ -105,19 +118,20 @@ k6/script.js                  # load generator
 - **Resource-attribute promotion:** Mimir promotes `service.name` and
   `deployment.environment` to metric labels (`service_name`, `deployment_environment`)
   so the dashboard can filter on them. Loki promotes them automatically.
-- **App → Alloy → Pyroscope:** the Java agent pushes profiles to Alloy
-  (`http://alloy:9999`, `pyroscope.receive_http`), which forwards them to
-  Pyroscope (`pyroscope.write`). Profiles are tagged with `environment=<env>`;
+- **Profiling → Alloy → Pyroscope:** the otel-profiling extension's profiler pushes
+  to Alloy (`http://alloy:9999`, `pyroscope.receive_http`), which forwards to
+  Pyroscope (`pyroscope.write`). Profiles are tagged with `environment=<env>`, and
   the app name becomes the Pyroscope `service_name`.
-- **Span profiles:** `io.pyroscope:otel` bridges to the Pyroscope agent's
-  profiler (so `otel.pyroscope.start.profiling=false` — the agent, not the lib,
-  runs the profiler) and adds span labels. Query a flame graph scoped to a span,
-  e.g. `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="graf-zahl-demo", span_name="GET"}`.
+- **Span profiles:** the extension runs the profiler
+  (`otel.pyroscope.start.profiling=true`) and adds span labels
+  (`otel.pyroscope.add.span.name=true`). Query a flame graph scoped to a span, e.g.
+  `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="graf-zahl-demo", span_name="GET"}`.
 
 ## Versions
 
-Java 21, Spring Boot 3.5.16, OpenTelemetry instrumentation BOM 2.16.0,
-Grafana 13.1, Loki 3.7, Tempo 3.0, Mimir 3.1, Pyroscope 2.1, Alloy 1.17, k6 2.1.
+Java 21, Spring Boot 3.5.16, OpenTelemetry Java agent 2.30.0,
+`io.pyroscope:otel` 1.0.4, Grafana 13.1, Loki 3.7, Tempo 3.0, Mimir 3.1,
+Pyroscope 2.1, Alloy 1.17, k6 2.1.
 
 > Tempo 3.0 runs in **monolithic mode** (`-target=all`) — its new architecture
 > only needs Kafka for microservices deployments. In-process, the distributor

@@ -30,10 +30,16 @@ datasources:
       streamingEnabled:
         search: true
         metrics: true
-      # Trace span -> jump to correlated logs in Loki
+      # Trace span -> jump to correlated logs in Loki. filterByTraceID adds
+      # the span's trace id to the query; the tag maps the span's service.name
+      # onto the Loki `service_name` stream selector, so the button on each span
+      # runs {service_name="graf-zahl-demo"} | trace_id="<id>".
       tracesToLogsV2:
         datasourceUid: loki
         filterByTraceID: true
+        tags:
+          - key: service.name
+            value: service_name
         spanStartTimeShift: "-5m"
         spanEndTimeShift: "5m"
       # Trace span -> related RED metrics in Mimir

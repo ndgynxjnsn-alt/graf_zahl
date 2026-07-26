@@ -18,32 +18,18 @@ x-app-common: &app-common
     - alloy
     - pyroscope
   environment: &app-common-env
-    # ---- OpenTelemetry: push everything to Alloy over OTLP/HTTP ----
+    # OTLP to Alloy. exporter=otlp, protocol=http/protobuf, trace-based
+    # exemplars and cumulative bucketed histograms are all OTel agent defaults,
+    # so the endpoint is the only thing to set (http/protobuf uses :4318).
+    # Export interval is shortened from the 60s default so the demo moves quickly.
     OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
-    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-    OTEL_LOGS_EXPORTER: otlp
-    OTEL_METRICS_EXPORTER: otlp
-    OTEL_TRACES_EXPORTER: otlp
     OTEL_METRIC_EXPORT_INTERVAL: "5000"
-    OTEL_METRICS_EXEMPLAR_FILTER: trace_based
-    # Classic (bucketed) histograms so quantiles + exemplars are easy to graph.
-    OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: explicit_bucket_histogram
-    # Bridge Micrometer meters (incl. the app's custom metrics) into the OTel SDK.
-    OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
-    # ---- otel-profiling-java: tag profiles with trace_id / span_id ----
-    # The javaagent already runs the profiler, so don't let the lib start a
-    # second one. Label root spans and include the span name.
-    OTEL_PYROSCOPE_START_PROFILING: "false"
-    OTEL_PYROSCOPE_ROOT_SPAN_ONLY: "true"
+    # otel-profiling-java (the OTel agent extension) runs the profiler and tags
+    # profiles with the active span; ship them to Alloy, which relays to Pyroscope.
+    OTEL_PYROSCOPE_START_PROFILING: "true"
     OTEL_PYROSCOPE_ADD_SPAN_NAME: "true"
-    # ---- Pyroscope agent: push profiles to Alloy, which relays to Pyroscope ----
     PYROSCOPE_APPLICATION_NAME: graf-zahl-demo
     PYROSCOPE_SERVER_ADDRESS: http://alloy:9999
-    PYROSCOPE_FORMAT: jfr
-    PYROSCOPE_PROFILER_EVENT: itimer
-    PYROSCOPE_PROFILER_ALLOC: 512k
-    PYROSCOPE_PROFILER_LOCK: 10ms
-    PYROSCOPE_LOG_LEVEL: info
 
 services:
   # ----------------------------------------------------------------------

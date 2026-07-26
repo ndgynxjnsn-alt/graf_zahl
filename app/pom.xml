@@ -19,20 +19,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <opentelemetry-instrumentation.version>2.16.0</opentelemetry-instrumentation.version>
     </properties>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>io.opentelemetry.instrumentation</groupId>
-                <artifactId>opentelemetry-instrumentation-bom</artifactId>
-                <version>${opentelemetry-instrumentation.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -40,35 +27,15 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Actuator + Micrometer: application metrics surface -->
+        <!--
+          Actuator brings in Micrometer, which the app uses for its custom
+          metrics. The OpenTelemetry Java agent auto-instruments the app
+          (traces, metrics, logs) at runtime, so no OTel libraries are needed
+          on the compile classpath.
+        -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-
-        <!--
-          Official OpenTelemetry Spring Boot starter.
-          Auto-configures OTLP exporters for TRACES, METRICS and LOGS,
-          bridges Micrometer metrics into the OTel SDK, installs the
-          Logback OTLP appender, and derives service.name from
-          spring.application.name. Everything is pushed (no scraping).
-        -->
-        <dependency>
-            <groupId>io.opentelemetry.instrumentation</groupId>
-            <artifactId>opentelemetry-spring-boot-starter</artifactId>
-        </dependency>
-
-        <!--
-          grafana/otel-profiling-java: annotates Pyroscope profiles with the
-          active trace_id / span_id so a Tempo span links straight to its
-          flame graph. It bridges to the Pyroscope javaagent's ProfilerSdk at
-          runtime and self-registers a SpanProcessor via an
-          AutoConfigurationCustomizerProvider (wired as a bean below).
-        -->
-        <dependency>
-            <groupId>io.pyroscope</groupId>
-            <artifactId>otel</artifactId>
-            <version>1.0.4</version>
         </dependency>
     </dependencies>
 
