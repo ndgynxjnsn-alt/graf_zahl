@@ -27,13 +27,17 @@ and continuous profiling** for a Java 21 / Spring Boot 3.5 application — all p
   app's custom metrics) are bridged automatically. No app-side OTel dependencies,
   no Prometheus scraping. The agent is attached via `JAVA_TOOL_OPTIONS`, so the
   Dockerfile entrypoint stays a plain `java -jar`.
-- **Profiling & trace ↔ profile correlation** via
-  [`grafana/otel-profiling-java`](https://github.com/grafana/otel-profiling-java),
-  loaded as an **OTel agent extension** (`-Dotel.javaagent.extensions`). It bundles
-  the Pyroscope profiler *and* stamps each profile with the active span
-  (`span_name` + Pyroscope span-profile linkage) — one extension, no separate
-  Pyroscope agent. Profiles are filterable per span, and a Tempo span links to its
-  flame graph.
+- **Profiling** via the **Pyroscope Java agent 2.1.x** (`-javaagent:pyroscope.jar`),
+  the real async-profiler-based profiler.
+- **Trace ↔ profile correlation** via
+  [`grafana/otel-profiling-java`](https://github.com/grafana/otel-profiling-java)
+  loaded as a small **OTel agent extension** (`-Dotel.javaagent.extensions`). The
+  extension bridges to the Pyroscope agent (over the system classloader) and stamps
+  each profile with the active span (`span_name`), so profiles are filterable per
+  span and a Tempo span links to its flame graph. **Agent order matters:** the
+  Pyroscope agent is listed *before* the OTel agent in `JAVA_TOOL_OPTIONS` so its
+  `ProfilerSdk` is loaded by the time the OTel agent builds the SDK and the
+  extension looks it up — otherwise the bridge silently falls back.
 - **Everything through Alloy.** Profiles are pushed to Alloy
   (`pyroscope.receive_http`), which relays to Pyroscope (`pyroscope.write`), so
   logs, metrics, traces *and* profiles all flow through Alloy.
@@ -52,9 +56,40 @@ and continuous profiling** for a Java 21 / Spring Boot 3.5 application — all p
 
 ## Run it
 
+### Docker Compose
+
 ```bash
 docker compose up -d --build
 ```
+
+### Docker Swarm
+
+The same file deploys to Swarm. All config files are shipped as top-level
+`configs:` (not bind mounts) and the app runs from a locally built image:
+
+```bash
+docker swarm init                       # if not already a swarm
+docker compose build                    # builds graf-zahl-app:local
+docker stack deploy --resolve-image=never -c docker-compose.yml graf-zahl
+```
+
+`--resolve-image=never` tells Swarm to use the locally built image instead of
+trying to pull a digest from a registry. After a **rebuild**, force the app
+services to pick up the new image:
+
+```bash
+docker compose build && docker service update --force --image graf-zahl-app:local graf-zahl_app-production
+```
+
+Swarm-specific choices in the compose file (all also valid under Compose):
+
+- **`configs:`** for every config file — portable across nodes, no host bind mounts.
+- **`mode: host`** published ports — bypasses the Swarm ingress routing mesh, which
+  is unreliable on single-node swarms.
+- **Ring addresses pinned to `127.0.0.1`** for Mimir and Pyroscope (and Loki). These
+  are single-replica monoliths that only talk to themselves; without this, Swarm's
+  overlay/VIP networking makes a component's own advertised IP unreachable and the
+  internal gRPC ring dials time out.
 
 Then open Grafana → dashboard **“Graf Zahl — Observability Showcase”**:
 
@@ -118,20 +153,20 @@ k6/script.js                  # load generator
 - **Resource-attribute promotion:** Mimir promotes `service.name` and
   `deployment.environment` to metric labels (`service_name`, `deployment_environment`)
   so the dashboard can filter on them. Loki promotes them automatically.
-- **Profiling → Alloy → Pyroscope:** the otel-profiling extension's profiler pushes
-  to Alloy (`http://alloy:9999`, `pyroscope.receive_http`), which forwards to
-  Pyroscope (`pyroscope.write`). Profiles are tagged with `environment=<env>`, and
-  the app name becomes the Pyroscope `service_name`.
-- **Span profiles:** the extension runs the profiler
-  (`otel.pyroscope.start.profiling=true`) and adds span labels
+- **Profiling → Alloy → Pyroscope:** the Pyroscope agent pushes to Alloy
+  (`http://alloy:9999`, `pyroscope.receive_http`), which forwards to Pyroscope
+  (`pyroscope.write`). Profiles are tagged with `environment=<env>`, and the app
+  name becomes the Pyroscope `service_name`.
+- **Span profiles:** the agent runs the profiler (`otel.pyroscope.start.profiling=false`
+  — the agent, not the extension, profiles) and the extension adds span labels
   (`otel.pyroscope.add.span.name=true`). Query a flame graph scoped to a span, e.g.
   `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="graf-zahl-demo", span_name="GET"}`.
 
 ## Versions
 
 Java 21, Spring Boot 3.5.16, OpenTelemetry Java agent 2.30.0,
-`io.pyroscope:otel` 1.0.4, Grafana 13.1, Loki 3.7, Tempo 3.0, Mimir 3.1,
-Pyroscope 2.1, Alloy 1.17, k6 2.1.
+Pyroscope Java agent 2.1.2 + `io.pyroscope:otel` 1.0.4 extension, Grafana 13.1,
+Loki 3.7, Tempo 3.0, Mimir 3.1, Pyroscope 2.1, Alloy 1.17, k6 2.1.
 
 > Tempo 3.0 runs in **monolithic mode** (`-target=all`) — its new architecture
 > only needs Kafka for microservices deployments. In-process, the distributor
