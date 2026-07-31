@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+services:
+  garage:
+    image: {{ versions.garage }}
+    container_name: garage
+    network_mode: host          # bind RPC/S3 on the node LAN IP for clustering
+    restart: unless-stopped
+    volumes:
+      - {{ stack_dir }}/garage/garage.toml:/etc/garage.toml:ro
+      - {{ ssd_mount }}/garage/meta:{{ ssd_mount }}/garage/meta
+{% for m in hdd_mounts %}
+      - {{ m }}/garage:{{ m }}/garage
+{% endfor %}

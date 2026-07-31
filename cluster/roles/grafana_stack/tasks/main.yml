@@ -1,0 +1,46 @@
+---
+# Loki / Mimir / Tempo / Pyroscope, one instance per node, joined into real
+# memberlist gossip rings and backed by the Garage S3 buckets.
+
+- name: Stack config directory
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/grafana_stack"
+    state: directory
+    mode: "0755"
+
+# The backend containers run as different (non-root) uids; make their data
+# dirs world-writable so each can create its WAL/index/compactor subdirs.
+- name: Per-backend data directories (on the SSD, writable by the containers)
+  ansible.builtin.file:
+    path: "{{ ssd_mount }}/{{ item }}"
+    state: directory
+    mode: "0777"
+  loop:
+    - loki
+    - mimir
+    - tempo
+    - pyroscope
+
+- name: Render backend configs
+  ansible.builtin.template:
+    src: "{{ item }}.yml.j2"
+    dest: "{{ stack_dir }}/grafana_stack/{{ item }}.yml"
+    mode: "0644"
+  loop:
+    - loki
+    - mimir
+    - tempo
+    - pyroscope
+  notify: Restart backends
+
+- name: Render grafana_stack compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ stack_dir }}/grafana_stack/compose.yml"
+    mode: "0644"
+
+- name: Start the backends
+  ansible.builtin.command:
+    cmd: docker compose -f {{ stack_dir }}/grafana_stack/compose.yml up -d
+  register: stack_up
+  changed_when: "'Started' in stack_up.stderr or 'Created' in stack_up.stderr or 'Recreated' in stack_up.stderr"

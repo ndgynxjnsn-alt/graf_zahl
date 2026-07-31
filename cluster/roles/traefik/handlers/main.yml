@@ -1,0 +1,5 @@
+---
+- name: Restart traefik
+  ansible.builtin.command:
+    cmd: docker compose -f {{ stack_dir }}/traefik/compose.yml restart
+  changed_when: true

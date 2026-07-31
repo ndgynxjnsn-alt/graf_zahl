@@ -1,0 +1,59 @@
+---
+# The Spring app + a tenant-scoped Alloy + k6, only on nodes that carry a
+# tenant (production → node1, test → node2). node3 runs backends only.
+- name: Tenant for this node
+  ansible.builtin.set_fact:
+    tenant: "{{ node_cfg.app_tenant }}"
+
+- name: Deploy the tenant workload
+  when: tenant | length > 0
+  block:
+    - name: App directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ stack_dir }}/app"
+        - "{{ stack_dir }}/app-src"
+
+    - name: Copy the app build context (Dockerfile, pom, src)
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: "0644"
+      loop:
+        - { src: "{{ playbook_dir }}/../app/Dockerfile", dest: "{{ stack_dir }}/app-src/Dockerfile" }
+        - { src: "{{ playbook_dir }}/../app/pom.xml", dest: "{{ stack_dir }}/app-src/pom.xml" }
+        - { src: "{{ playbook_dir }}/../app/src/", dest: "{{ stack_dir }}/app-src/src/" }
+
+    - name: Build the app image on the node
+      ansible.builtin.command:
+        cmd: docker build -t {{ versions.app }} .
+        chdir: "{{ stack_dir }}/app-src"
+      register: app_build
+      changed_when: "'naming to' in app_build.stderr or 'writing image' in app_build.stderr"
+
+    - name: Render tenant Alloy config
+      ansible.builtin.template:
+        src: config.alloy.j2
+        dest: "{{ stack_dir }}/app/config.alloy"
+        mode: "0644"
+
+    - name: Render k6 load script
+      ansible.builtin.template:
+        src: k6.js.j2
+        dest: "{{ stack_dir }}/app/k6.js"
+        mode: "0644"
+
+    - name: Render app compose
+      ansible.builtin.template:
+        src: compose.yml.j2
+        dest: "{{ stack_dir }}/app/compose.yml"
+        mode: "0644"
+
+    - name: Start app + Alloy + k6
+      ansible.builtin.command:
+        cmd: docker compose -f {{ stack_dir }}/app/compose.yml up -d
+      register: app_up
+      changed_when: "'Started' in app_up.stderr or 'Created' in app_up.stderr or 'Recreated' in app_up.stderr"

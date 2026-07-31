@@ -1,0 +1,7 @@
+---
+# `docker compose up -d` does not restart a container when only its mounted
+# config file changed, so restart the stack when a rendered config changes.
+- name: Restart backends
+  ansible.builtin.command:
+    cmd: docker compose -f {{ stack_dir }}/grafana_stack/compose.yml restart
+  changed_when: true

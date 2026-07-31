@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+apiVersion: 1
+providers:
+  - name: cluster
+    orgId: 1
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /etc/dashboards
+      foldersFromFilesStructure: false

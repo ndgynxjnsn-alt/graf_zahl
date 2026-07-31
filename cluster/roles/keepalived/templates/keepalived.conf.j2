@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+# Floats {{ virtual_ip }} across the nodes; the highest-priority node with a
+# healthy Traefik holds it. If Traefik dies or the node goes down, the VIP moves.
+global_defs {
+    enable_script_security
+    script_user root
+}
+
+vrrp_script chk_traefik {
+    script "/usr/bin/curl -sf -o /dev/null http://localhost:{{ ports.traefik_dashboard }}/ping"
+    interval 2
+    weight -40
+    fall 2
+    rise 2
+}
+
+vrrp_instance graf_zahl {
+    state {{ node_cfg.keepalived_state }}
+    interface {{ vip_interface }}
+    virtual_router_id {{ keepalived_vrid }}
+    priority {{ node_cfg.keepalived_priority }}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ virtual_ip }}/24
+    }
+    track_script {
+        chk_traefik
+    }
+}

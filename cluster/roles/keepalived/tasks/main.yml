@@ -1,0 +1,33 @@
+---
+- name: Install keepalived and curl (native, manages the host VIP)
+  ansible.builtin.apt:
+    name:
+      - keepalived
+      - curl
+    state: present
+
+# The private-network NIC is eth1 on some boxes, enp0s8 on others — detect it
+# from the node IP so the config is portable.
+- name: Detect the interface carrying the node IP
+  # No pipefail: awk exits on first match, which SIGPIPEs `ip` (rc 141) racily.
+  ansible.builtin.shell: |
+    ip -o -4 addr show | awk '$4 ~ /^{{ node_ip }}\// {print $2; exit}'
+  register: iface_out
+  changed_when: false
+
+- name: Set VIP interface fact
+  ansible.builtin.set_fact:
+    vip_interface: "{{ iface_out.stdout | trim | default(keepalived_interface, true) }}"
+
+- name: Render keepalived config
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    mode: "0644"
+  notify: Restart keepalived
+
+- name: Enable and start keepalived
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: true
+    state: started

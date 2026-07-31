@@ -1,0 +1,24 @@
+---
+# Docker engine + the `docker compose` v2 plugin. Ubuntu's own packages are
+# used rather than Docker's external apt repo, which can lag a brand-new
+# Ubuntu codename (26.04 "resolute").
+- name: Install Docker engine and compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable and start Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Let the login user run docker without sudo
+  ansible.builtin.user:
+    name: "{{ ansible_user | default('vagrant') }}"
+    groups: docker
+    append: true

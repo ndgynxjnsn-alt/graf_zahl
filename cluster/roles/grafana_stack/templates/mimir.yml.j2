@@ -1,0 +1,69 @@
+# {{ ansible_managed }}
+# Mimir — clustered (memberlist ring), multi-tenant, S3 (Garage).
+multitenancy_enabled: true
+
+server:
+  http_listen_port: {{ ports.mimir_http }}
+  grpc_listen_port: {{ ports.mimir_grpc }}
+  log_level: warn
+
+common:
+  storage:
+    backend: s3
+    s3:
+      endpoint: {{ node_ip }}:{{ ports.garage_s3 }}
+      bucket_name: mimir
+      access_key_id: {{ garage_s3_key_id }}
+      secret_access_key: {{ garage_s3_secret }}
+      region: {{ garage_s3_region }}
+      insecure: true
+
+# Gossip ring: distinct bind port (Mimir=7947) + join the 3 nodes.
+memberlist:
+  bind_port: {{ ports.mimir_memberlist }}
+  advertise_addr: {{ node_ip }}
+  cluster_label: "mimir"   # isolate this app's gossip from the others
+  rejoin_interval: 30s     # self-heal the ring after staggered restarts
+  join_members:
+{% for n in cluster_nodes %}
+    - {{ n.ip }}:{{ ports.mimir_memberlist }}
+{% endfor %}
+
+# Every ring advertises the node LAN IP and uses memberlist as the kvstore.
+ingester:
+  ring:
+    kvstore: { store: memberlist }
+    replication_factor: {{ ring_replication_factor }}
+    instance_addr: {{ node_ip }}
+distributor:
+  ring:
+    kvstore: { store: memberlist }
+    instance_addr: {{ node_ip }}
+store_gateway:
+  sharding_ring:
+    kvstore: { store: memberlist }
+    replication_factor: {{ ring_replication_factor }}
+    instance_addr: {{ node_ip }}
+compactor:
+  data_dir: {{ ssd_mount }}/mimir/compactor
+  sharding_ring:
+    kvstore: { store: memberlist }
+    instance_addr: {{ node_ip }}
+ruler:
+  ring:
+    kvstore: { store: memberlist }
+    instance_addr: {{ node_ip }}
+
+# One S3 bucket, separated by prefix per component.
+blocks_storage:
+  storage_prefix: blocks
+  tsdb:
+    dir: {{ ssd_mount }}/mimir/tsdb
+  bucket_store:
+    sync_dir: {{ ssd_mount }}/mimir/tsdb-sync
+ruler_storage:
+  storage_prefix: ruler
+
+limits:
+  max_global_exemplars_per_user: 100000
+  promote_otel_resource_attributes: "service.name,deployment.environment"

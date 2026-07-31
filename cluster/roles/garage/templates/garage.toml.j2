@@ -1,0 +1,31 @@
+# {{ ansible_managed }}
+# Garage S3 object storage — one instance per node, forming a cluster over RPC.
+metadata_dir = "{{ ssd_mount }}/garage/meta"     # metadata on the fast SSD
+data_dir = [
+{% for m in hdd_mounts %}
+  { path = "{{ m }}/garage", capacity = "{{ garage_hdd_capacity }}" },
+{% endfor %}
+]
+db_engine = "lmdb"
+metadata_auto_snapshot_interval = "6h"
+
+# Replicate every object to 3 nodes (one per zone) → survives one node down.
+replication_factor = {{ ring_replication_factor }}
+
+rpc_bind_addr = "[::]:{{ ports.garage_rpc }}"
+rpc_public_addr = "{{ node_ip }}:{{ ports.garage_rpc }}"
+rpc_secret = "{{ garage_rpc_secret }}"
+
+[s3_api]
+s3_region = "{{ garage_s3_region }}"
+api_bind_addr = "[::]:{{ ports.garage_s3 }}"
+root_domain = ".s3.{{ base_domain }}"
+
+[s3_web]
+bind_addr = "[::]:{{ ports.garage_web }}"
+root_domain = ".web.{{ base_domain }}"
+index = "index.html"
+
+[admin]
+api_bind_addr = "[::]:{{ ports.garage_admin }}"
+admin_token = "{{ garage_rpc_secret }}"

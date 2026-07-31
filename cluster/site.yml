@@ -1,0 +1,19 @@
+---
+# Configure the whole 3-node cluster. Idempotent — re-run any time to
+# converge the nodes back to this definition ("replayable").
+- name: Graf Zahl HA cluster
+  hosts: cluster
+  become: true
+  vars:
+    # The current node's entry from cluster_nodes (ip, zone, keepalived_*, app_tenant).
+    node_cfg: "{{ cluster_nodes | selectattr('name', 'equalto', inventory_hostname) | first }}"
+    node_ip: "{{ node_cfg.ip }}"
+  roles:
+    - common        # base packages, /etc/hosts, disk mounts (SSD + 4 HDDs), sysctl
+    - docker        # Docker engine + compose plugin
+    - garage        # clustered S3 object storage (metadata on SSD, data on HDDs)
+    - grafana_stack # Loki/Mimir/Tempo/Pyroscope: real gossip ring, S3, multi-tenant
+    - grafana       # Grafana with per-tenant datasources + the showcase dashboard
+    - app           # Spring app (production on node1, test on node2) + local Alloy
+    - keepalived    # VRRP virtual IP for HA
+    - traefik       # reverse proxy / TLS front door on the VIP

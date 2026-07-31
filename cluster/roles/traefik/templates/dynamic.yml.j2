@@ -1,0 +1,32 @@
+# {{ ansible_managed }}
+# Routers + load-balanced services. Grafana and Garage S3 are balanced across
+# all 3 nodes with health checks, so one node down is invisible to clients.
+http:
+  routers:
+    grafana:
+      rule: "Host(`grafana.{{ base_domain }}`)"
+      entryPoints: [websecure]
+      service: grafana
+      tls: {}                       # Traefik's default self-signed cert (dev)
+    garage-s3:
+      rule: "Host(`s3.{{ base_domain }}`)"
+      entryPoints: [websecure]
+      service: garage-s3
+      tls: {}
+
+  services:
+    grafana:
+      loadBalancer:
+        healthCheck:
+          path: /api/health
+          interval: 10s
+        servers:
+{% for n in cluster_nodes %}
+          - url: "http://{{ n.ip }}:{{ ports.grafana_http }}"
+{% endfor %}
+    garage-s3:
+      loadBalancer:
+        servers:
+{% for n in cluster_nodes %}
+          - url: "http://{{ n.ip }}:{{ ports.garage_s3 }}"
+{% endfor %}

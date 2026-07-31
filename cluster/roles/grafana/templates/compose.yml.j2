@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+services:
+  grafana:
+    image: {{ versions.grafana }}
+    container_name: grafana
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_FEATURE_TOGGLES_ENABLE: traceToProfiles
+      GF_SERVER_HTTP_PORT: "{{ ports.grafana_http }}"
+    volumes:
+      - {{ stack_dir }}/grafana/provisioning:/etc/grafana/provisioning:ro
+      - {{ stack_dir }}/grafana/dashboards:/etc/dashboards:ro
+      - {{ ssd_mount }}/grafana:/var/lib/grafana

@@ -1,0 +1,52 @@
+# {{ ansible_managed }}
+# The four Grafana backends, one instance per node, all on host networking so
+# their memberlist gossip uses the node LAN IP.
+services:
+  loki:
+    image: {{ versions.loki }}
+    container_name: loki
+    network_mode: host
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - {{ stack_dir }}/grafana_stack/loki.yml:/etc/loki/loki.yml:ro
+      - {{ ssd_mount }}/loki:{{ ssd_mount }}/loki
+
+  mimir:
+    image: {{ versions.mimir }}
+    container_name: mimir
+    network_mode: host
+    restart: unless-stopped
+    command: -config.file=/etc/mimir/mimir.yml
+    volumes:
+      - {{ stack_dir }}/grafana_stack/mimir.yml:/etc/mimir/mimir.yml:ro
+      - {{ ssd_mount }}/mimir:{{ ssd_mount }}/mimir
+
+  tempo:
+    image: {{ versions.tempo }}
+    container_name: tempo
+    network_mode: host
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo.yml
+    volumes:
+      - {{ stack_dir }}/grafana_stack/tempo.yml:/etc/tempo/tempo.yml:ro
+      - {{ ssd_mount }}/tempo:{{ ssd_mount }}/tempo
+
+  pyroscope:
+    image: {{ versions.pyroscope }}
+    container_name: pyroscope
+    network_mode: host
+    restart: unless-stopped
+    # Ring instance addresses as flags (advertise the node LAN IP, not loopback).
+    command:
+      - -config.file=/etc/pyroscope/pyroscope.yml
+      - -segment-writer.lifecycler.addr={{ node_ip }}
+      - -distributor.ring.instance-addr={{ node_ip }}
+      - -compactor.ring.instance-addr={{ node_ip }}
+      - -store-gateway.sharding-ring.instance-addr={{ node_ip }}
+      - -query-scheduler.ring.instance-addr={{ node_ip }}
+      - -query-frontend.instance-addr={{ node_ip }}
+      - -overrides-exporter.ring.instance-addr={{ node_ip }}
+    volumes:
+      - {{ stack_dir }}/grafana_stack/pyroscope.yml:/etc/pyroscope/pyroscope.yml:ro
+      - {{ ssd_mount }}/pyroscope:{{ ssd_mount }}/pyroscope

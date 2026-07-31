@@ -1,0 +1,20 @@
+// {{ ansible_managed }}
+// Steady trickle of load against the node-local app ({{ tenant }} tenant).
+import http from "k6/http";
+import { sleep, check } from "k6";
+
+const BASE = "http://localhost:{{ ports.app_http }}";
+const ENDPOINTS = ["/rolldice", "/work", "/flaky", "/"];
+
+export const options = {
+  scenarios: {
+    steady: { executor: "constant-vus", vus: 3, duration: "48h" },
+  },
+};
+
+export default function () {
+  const path = ENDPOINTS[Math.floor(Math.random() * ENDPOINTS.length)];
+  const res = http.get(`${BASE}${path}`);
+  check(res, { "responded": (r) => r.status > 0 });
+  sleep(Math.random() * 1.5 + 0.5);
+}

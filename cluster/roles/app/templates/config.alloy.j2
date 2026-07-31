@@ -1,0 +1,62 @@
+// {{ ansible_managed }}
+// This node runs a single tenant ({{ tenant }}), so Alloy just stamps every
+// export with X-Scope-OrgID = {{ tenant }} and ships to the node-local backends
+// (which replicate across the ring).
+
+otelcol.receiver.otlp "default" {
+  grpc { endpoint = "0.0.0.0:{{ ports.alloy_otlp_grpc }}" }
+  http { endpoint = "0.0.0.0:{{ ports.alloy_otlp_http }}" }
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.exporter.otlphttp.mimir.input]
+    logs    = [otelcol.exporter.otlphttp.loki.input]
+    traces  = [otelcol.exporter.otlphttp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlphttp "tempo" {
+  client {
+    endpoint = "http://localhost:{{ ports.tempo_otlp_http }}"
+    headers  = { "X-Scope-OrgID" = "{{ tenant }}" }
+    tls { insecure = true }
+  }
+}
+
+otelcol.exporter.otlphttp "loki" {
+  client {
+    endpoint = "http://localhost:{{ ports.loki_http }}/otlp"
+    headers  = { "X-Scope-OrgID" = "{{ tenant }}" }
+    tls { insecure = true }
+  }
+}
+
+otelcol.exporter.otlphttp "mimir" {
+  client {
+    endpoint = "http://localhost:{{ ports.mimir_http }}/otlp"
+    headers  = { "X-Scope-OrgID" = "{{ tenant }}" }
+    tls { insecure = true }
+  }
+}
+
+// Profiles: receive from the Pyroscope agent, relay to Pyroscope with the tenant.
+pyroscope.receive_http "default" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port    = {{ ports.alloy_pyroscope_ingest }}
+  }
+  forward_to = [pyroscope.write.default.receiver]
+}
+
+pyroscope.write "default" {
+  endpoint {
+    url     = "http://localhost:{{ ports.pyroscope_http }}"
+    headers = { "X-Scope-OrgID" = "{{ tenant }}" }
+  }
+}

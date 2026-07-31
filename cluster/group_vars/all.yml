@@ -1,0 +1,110 @@
+---
+# =====================================================================
+# Graf Zahl HA cluster — single source of truth
+# =====================================================================
+# Everything downstream (Vagrantfile sizing, rendered configs, compose
+# files, keepalived, Traefik) derives from the values here.
+
+# ---- Nodes & networking ---------------------------------------------
+# Fixed IPs on the VirtualBox host-only network. Each node is its own
+# Garage "zone" so replication_factor=3 puts one copy per node.
+cluster_nodes:
+  - { name: node1, ip: 192.168.56.11, zone: dc1, keepalived_state: MASTER, keepalived_priority: 150, app_tenant: production }
+  - { name: node2, ip: 192.168.56.12, zone: dc2, keepalived_state: BACKUP, keepalived_priority: 100, app_tenant: test }
+  - { name: node3, ip: 192.168.56.13, zone: dc3, keepalived_state: BACKUP, keepalived_priority: 90,  app_tenant: "" }
+
+# Virtual IP that keepalived floats across the nodes; Traefik front door.
+virtual_ip: 192.168.56.10
+# sslip.io resolves <anything>.192-168-56-10.sslip.io -> the VIP, no DNS setup.
+base_domain: "192-168-56-10.sslip.io"
+
+# ---- Multi-tenancy ---------------------------------------------------
+# The two app environments become the two tenants (X-Scope-OrgID).
+tenants:
+  - production
+  - test
+
+# ---- Image versions (match the single-node stack where shared) ------
+versions:
+  garage: "dxflrs/garage:v2.3.0"
+  loki: "grafana/loki:3.7.3"
+  mimir: "grafana/mimir:3.1.3"
+  # Cluster uses Tempo 2.10 (classic distributor→ingester memberlist ring, which
+  # clusters cleanly with shared S3). Tempo 3.0's multi-node path wants Kafka;
+  # the single-node dev stack still runs 3.0 monolithic.
+  tempo: "grafana/tempo:2.10.7"
+  pyroscope: "grafana/pyroscope:2.1.1"
+  alloy: "grafana/alloy:v1.17.1"
+  grafana: "grafana/grafana:13.1.0"
+  traefik: "traefik:v3.3"
+  k6: "grafana/k6:2.1.0"
+  app: "graf-zahl-app:local"   # built locally from ../app, loaded onto each node
+
+# ---- Port map (host networking → every port must be unique) ---------
+# dskit backends all default memberlist=7946 and gRPC=9095; spread them out.
+ports:
+  loki_http: 3100
+  loki_grpc: 9096
+  loki_memberlist: 7946
+  mimir_http: 9009
+  mimir_grpc: 9095
+  mimir_memberlist: 7947
+  tempo_http: 3200
+  tempo_grpc: 9195
+  tempo_memberlist: 7948
+  tempo_otlp_grpc: 4417      # moved off 4317 — Alloy owns 4317/4318 on the shared host net
+  tempo_otlp_http: 4418
+  pyroscope_http: 4040
+  pyroscope_grpc: 9295
+  pyroscope_memberlist: 7949
+  garage_s3: 3900
+  garage_rpc: 3901
+  garage_web: 3902
+  garage_admin: 3903
+  alloy_http: 12345
+  alloy_otlp_grpc: 4317
+  alloy_otlp_http: 4318
+  alloy_pyroscope_ingest: 9999
+  grafana_http: 3000
+  app_http: 8080
+  traefik_dashboard: 8081   # moved off 8080 to avoid the app's 8080 on shared host net
+
+# Replicate every stream/series/trace to all 3 nodes (write/read quorum 2).
+ring_replication_factor: 3
+
+# ---- Storage layout (1 SSD + 4 HDDs per server) ---------------------
+# The common role partitions & mounts these. Garage metadata + all the
+# ring WALs live on the SSD; bulk object data spreads across the HDDs.
+ssd_mount: /mnt/ssd
+hdd_mounts:
+  - /mnt/hdd1
+  - /mnt/hdd2
+  - /mnt/hdd3
+  - /mnt/hdd4
+# Per-HDD capacity advertised to Garage. DEV value; on real hardware set to
+# the real disk size (e.g. "4T").
+garage_hdd_capacity: "1G"
+# Node's total capacity in the cluster layout (≈ sum of its HDDs).
+garage_node_capacity: "4G"
+
+# ---- Garage cluster --------------------------------------------------
+garage_rpc_secret: "53127ba52d8f66e5e09ee1ea4d5d13c84d759505f7d0a1e1d06c84e0add374e0"
+garage_s3_region: "garage"
+# Deterministic S3 credentials imported into Garage, then handed to the
+# backends. (Rotate for anything real.)
+garage_s3_key_id: "GK5f0a1e1d06c84e0add374e01"
+garage_s3_secret: "b1946ac92492d2347c6235b4d2611184b7c5e2f0e9a1c0d3f5a7b9c1e3d5f7a9"
+# One bucket per backend.
+garage_buckets:
+  - loki
+  - mimir
+  - tempo
+  - pyroscope
+
+# ---- keepalived ------------------------------------------------------
+keepalived_vrid: 51
+keepalived_auth_pass: "grafzahl"   # VRRP simple auth is max 8 chars
+keepalived_interface: eth1          # the private_network NIC in the Vagrant box
+
+# ---- Directories on the host ----------------------------------------
+stack_dir: /opt/graf-zahl           # rendered configs + compose files live here

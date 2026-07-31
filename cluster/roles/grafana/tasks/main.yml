@@ -1,0 +1,50 @@
+---
+# Grafana on every node (stateless, fully provisioned), load-balanced by Traefik.
+
+- name: Grafana directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ stack_dir }}/grafana/provisioning/datasources"
+    - "{{ stack_dir }}/grafana/provisioning/dashboards"
+    - "{{ stack_dir }}/grafana/dashboards"
+
+- name: Grafana data dir (owned by the grafana container uid 472)
+  ansible.builtin.file:
+    path: "{{ ssd_mount }}/grafana"
+    state: directory
+    owner: "472"
+    group: "472"
+    mode: "0755"
+
+- name: Provision per-tenant datasources
+  ansible.builtin.template:
+    src: datasources.yml.j2
+    dest: "{{ stack_dir }}/grafana/provisioning/datasources/datasources.yml"
+    mode: "0644"
+
+- name: Provision dashboard provider
+  ansible.builtin.template:
+    src: dashboards.yml.j2
+    dest: "{{ stack_dir }}/grafana/provisioning/dashboards/dashboards.yml"
+    mode: "0644"
+
+- name: Install the multi-tenant dashboard
+  ansible.builtin.copy:
+    src: showcase.json
+    dest: "{{ stack_dir }}/grafana/dashboards/showcase.json"
+    mode: "0644"
+
+- name: Render Grafana compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ stack_dir }}/grafana/compose.yml"
+    mode: "0644"
+
+- name: Start Grafana
+  ansible.builtin.command:
+    cmd: docker compose -f {{ stack_dir }}/grafana/compose.yml up -d
+  register: grafana_up
+  changed_when: "'Started' in grafana_up.stderr or 'Created' in grafana_up.stderr or 'Recreated' in grafana_up.stderr"

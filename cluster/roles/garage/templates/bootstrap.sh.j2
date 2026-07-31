@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# One-time cluster bootstrap, run from node1: connect peers, assign the storage
+# layout, then create the per-backend buckets and S3 key. Idempotent-ish: the
+# whole script is guarded by a `creates:` marker in Ansible, and each step
+# tolerates "already done".
+set -euo pipefail
+G() { docker exec garage /garage "$@"; }
+
+echo "Waiting for local Garage to be ready..."
+for i in $(seq 1 30); do G status >/dev/null 2>&1 && break; sleep 2; done
+
+echo "Connecting peers..."
+{% for n in cluster_nodes if n.name != inventory_hostname %}
+G node connect {{ hostvars[n.name].node_garage_id }} || true
+{% endfor %}
+sleep 3
+
+echo "Assigning cluster layout (one zone per node)..."
+{% for n in cluster_nodes %}
+G layout assign -z {{ n.zone }} -c {{ garage_node_capacity }} {{ hostvars[n.name].node_garage_pubkey }}
+{% endfor %}
+G layout apply --version 1
+
+echo "Creating S3 key..."
+G key import --yes -n graf-zahl {{ garage_s3_key_id }} {{ garage_s3_secret }} \
+  || echo "key already present"
+
+echo "Creating buckets + granting access..."
+{% for b in garage_buckets %}
+G bucket create {{ b }} || true
+G bucket allow --read --write --owner {{ b }} --key graf-zahl
+{% endfor %}
+
+echo "Garage cluster bootstrapped."
+G status

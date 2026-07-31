@@ -1,0 +1,32 @@
+# {{ ansible_managed }}
+# Traefik static config. Runs on every node (host net); the node holding the
+# VIP receives traffic and load-balances across all 3 backends.
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint: { to: websecure, scheme: https }
+  websecure:
+    address: ":443"
+  traefik:
+    address: ":{{ ports.traefik_dashboard }}"
+
+api:
+  dashboard: true
+  insecure: true          # dashboard/ping on :{{ ports.traefik_dashboard }} (dev; restrict to VIP in prod)
+
+ping:
+  entryPoint: traefik     # keepalived checks http://localhost:8080/ping
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: WARN

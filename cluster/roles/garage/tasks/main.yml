@@ -1,0 +1,84 @@
+---
+# Garage: clustered, S3-compatible object storage. Metadata on the SSD, bulk
+# data spread across the 4 HDDs, replicated to all 3 nodes.
+
+- name: Garage directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ [stack_dir + '/garage', ssd_mount + '/garage/meta'] + (hdd_mounts | map('regex_replace', '$', '/garage') | list) }}"
+
+- name: Render garage.toml
+  ansible.builtin.template:
+    src: garage.toml.j2
+    dest: "{{ stack_dir }}/garage/garage.toml"
+    mode: "0640"
+
+- name: Render garage compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ stack_dir }}/garage/compose.yml"
+    mode: "0644"
+
+- name: Start Garage
+  ansible.builtin.command:
+    cmd: docker compose -f {{ stack_dir }}/garage/compose.yml up -d
+  register: garage_up
+  changed_when: "'Started' in garage_up.stderr or 'Created' in garage_up.stderr or 'Recreated' in garage_up.stderr"
+
+- name: Wait for this node's Garage RPC to answer
+  ansible.builtin.command: docker exec garage /garage status
+  register: garage_status
+  until: garage_status.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: Read this node's Garage node id
+  ansible.builtin.command: docker exec garage /garage node id -q
+  register: garage_node_id
+  changed_when: false
+
+- name: Publish node id / pubkey as facts (used by the node1 bootstrap)
+  ansible.builtin.set_fact:
+    # Full id looks like <pubkey>@<ip>:<rpc_port>
+    node_garage_id: "{{ garage_node_id.stdout | trim }}"
+    node_garage_pubkey: "{{ (garage_node_id.stdout | trim).split('@')[0] }}"
+
+# ---- One-time cluster bootstrap, from node1 only ---------------------
+# Skipped entirely once done (the marker exists), so a later re-run doesn't
+# depend on every node being reachable to render the peer list.
+- name: Check whether the cluster is already bootstrapped
+  ansible.builtin.stat:
+    path: "{{ stack_dir }}/garage/.bootstrapped"
+  register: garage_marker
+  when: inventory_hostname == cluster_nodes[0].name
+
+- name: Render the bootstrap script (node1)
+  ansible.builtin.template:
+    src: bootstrap.sh.j2
+    dest: "{{ stack_dir }}/garage/bootstrap.sh"
+    mode: "0755"
+  when:
+    - inventory_hostname == cluster_nodes[0].name
+    - not garage_marker.stat.exists
+
+- name: Bootstrap the Garage cluster (layout + buckets + key)
+  ansible.builtin.command:
+    cmd: "{{ stack_dir }}/garage/bootstrap.sh"
+    creates: "{{ stack_dir }}/garage/.bootstrapped"
+  register: garage_bootstrap
+  when:
+    - inventory_hostname == cluster_nodes[0].name
+    - not garage_marker.stat.exists
+
+- name: Mark cluster as bootstrapped
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/garage/.bootstrapped"
+    state: touch
+    mode: "0644"
+  when:
+    - inventory_hostname == cluster_nodes[0].name
+    - not garage_marker.stat.exists
+    - garage_bootstrap is changed

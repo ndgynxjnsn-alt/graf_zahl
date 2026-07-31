@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+services:
+  traefik:
+    image: {{ versions.traefik }}
+    container_name: traefik
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - {{ stack_dir }}/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - {{ stack_dir }}/traefik/dynamic:/etc/traefik/dynamic:ro

@@ -1,0 +1,79 @@
+# {{ ansible_managed }}
+# One set of datasources per tenant. Each carries the tenant's X-Scope-OrgID
+# header, so multi-tenancy is enforced end to end and the two tenants' data
+# never mix. Grafana is host-networked, so it queries the node-local backend.
+apiVersion: 1
+datasources:
+{% for t in tenants %}
+  # ---------------- tenant: {{ t }} ----------------
+  - name: Mimir-{{ t }}
+    uid: mimir-{{ t }}
+    type: prometheus
+    access: proxy
+    url: http://localhost:{{ ports.mimir_http }}/prometheus
+    isDefault: {{ 'true' if (loop.first) else 'false' }}
+    jsonData:
+      httpMethod: POST
+      prometheusType: Mimir
+      httpHeaderName1: X-Scope-OrgID
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo-{{ t }}
+          urlDisplayLabel: "View trace"
+    secureJsonData:
+      httpHeaderValue1: "{{ t }}"
+
+  - name: Loki-{{ t }}
+    uid: loki-{{ t }}
+    type: loki
+    access: proxy
+    url: http://localhost:{{ ports.loki_http }}
+    jsonData:
+      httpHeaderName1: X-Scope-OrgID
+      derivedFields:
+        - name: trace_id
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo-{{ t }}
+          url: "${__value.raw}"
+          urlDisplayLabel: "View trace"
+    secureJsonData:
+      httpHeaderValue1: "{{ t }}"
+
+  - name: Tempo-{{ t }}
+    uid: tempo-{{ t }}
+    type: tempo
+    access: proxy
+    url: http://localhost:{{ ports.tempo_http }}
+    jsonData:
+      httpHeaderName1: X-Scope-OrgID
+      streamingEnabled:
+        search: true
+      tracesToLogsV2:
+        datasourceUid: loki-{{ t }}
+        filterByTraceID: true
+        tags:
+          - key: service.name
+            value: service_name
+      tracesToMetrics:
+        datasourceUid: mimir-{{ t }}
+      tracesToProfiles:
+        datasourceUid: pyroscope-{{ t }}
+        profileTypeId: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
+      serviceMap:
+        datasourceUid: mimir-{{ t }}
+      nodeGraph:
+        enabled: true
+    secureJsonData:
+      httpHeaderValue1: "{{ t }}"
+
+  - name: Pyroscope-{{ t }}
+    uid: pyroscope-{{ t }}
+    type: grafana-pyroscope-datasource
+    access: proxy
+    url: http://localhost:{{ ports.pyroscope_http }}
+    jsonData:
+      httpHeaderName1: X-Scope-OrgID
+    secureJsonData:
+      httpHeaderValue1: "{{ t }}"
+{% endfor %}

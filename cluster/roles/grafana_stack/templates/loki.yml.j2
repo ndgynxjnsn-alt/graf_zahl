@@ -1,0 +1,61 @@
+# {{ ansible_managed }}
+# Loki — clustered (memberlist ring across the 3 nodes), multi-tenant, S3 (Garage).
+auth_enabled: true            # multi-tenancy: every request needs X-Scope-OrgID
+
+server:
+  http_listen_port: {{ ports.loki_http }}
+  grpc_listen_port: {{ ports.loki_grpc }}
+  log_level: warn
+
+common:
+  path_prefix: {{ ssd_mount }}/loki
+  replication_factor: {{ ring_replication_factor }}
+  ring:
+    kvstore:
+      store: memberlist
+    instance_addr: {{ node_ip }}          # advertise the LAN IP, not 127.0.0.1
+  storage:
+    s3:
+      endpoint: {{ node_ip }}:{{ ports.garage_s3 }}
+      bucketnames: loki
+      access_key_id: {{ garage_s3_key_id }}
+      secret_access_key: {{ garage_s3_secret }}
+      region: {{ garage_s3_region }}
+      s3forcepathstyle: true
+      insecure: true
+
+# Gossip ring: distinct bind port (Loki=7946) + join the 3 nodes.
+memberlist:
+  bind_port: {{ ports.loki_memberlist }}
+  advertise_addr: {{ node_ip }}
+  cluster_label: "loki"   # isolate this app's gossip from the others
+  rejoin_interval: 30s     # self-heal the ring after staggered restarts
+  join_members:
+{% for n in cluster_nodes %}
+    - {{ n.ip }}:{{ ports.loki_memberlist }}
+{% endfor %}
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: {{ ssd_mount }}/loki/index
+    cache_location: {{ ssd_mount }}/loki/index-cache
+
+limits_config:
+  allow_structured_metadata: true
+  volume_enabled: true
+  retention_period: 168h
+
+compactor:
+  working_directory: {{ ssd_mount }}/loki/compactor
+  delete_request_store: s3
+  retention_enabled: true

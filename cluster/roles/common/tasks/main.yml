@@ -1,0 +1,81 @@
+---
+# Base OS setup shared by every node: name resolution, packages, the
+# SSD + 4×HDD storage layout, and kernel tuning for the gossip cluster.
+
+- name: Cluster hostnames in /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} GRAF-ZAHL CLUSTER"
+    block: |
+      {% for n in cluster_nodes %}
+      {{ n.ip }} {{ n.name }}
+      {% endfor %}
+      {{ virtual_ip }} vip {{ base_domain }}
+
+- name: Base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - python3
+      - acl              # needed for become to unprivileged users
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---- Storage: format & mount the extra disks -------------------------
+# Deterministic device order from the Vagrantfile SATA attach order:
+#   sdb = SSD, sdc..sdf = HDD1..4. On real hardware, adjust `data_disks`.
+- name: Build the disk → mount map
+  ansible.builtin.set_fact:
+    data_disks:
+      - { device: /dev/sdb, mount: "{{ ssd_mount }}" }
+      - { device: /dev/sdc, mount: "{{ hdd_mounts[0] }}" }
+      - { device: /dev/sdd, mount: "{{ hdd_mounts[1] }}" }
+      - { device: /dev/sde, mount: "{{ hdd_mounts[2] }}" }
+      - { device: /dev/sdf, mount: "{{ hdd_mounts[3] }}" }
+
+- name: Create mount points
+  ansible.builtin.file:
+    path: "{{ item.mount }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ data_disks }}"
+  loop_control: { label: "{{ item.mount }}" }
+
+- name: Make an ext4 filesystem on each disk (idempotent)
+  community.general.filesystem:
+    fstype: ext4
+    dev: "{{ item.device }}"
+  loop: "{{ data_disks }}"
+  loop_control: { label: "{{ item.device }}" }
+
+- name: Mount each disk and persist to fstab
+  ansible.posix.mount:
+    path: "{{ item.mount }}"
+    src: "{{ item.device }}"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted
+  loop: "{{ data_disks }}"
+  loop_control: { label: "{{ item.mount }} <- {{ item.device }}" }
+
+- name: Root stack directory for rendered configs & compose files
+  ansible.builtin.file:
+    path: "{{ stack_dir }}"
+    state: directory
+    mode: "0755"
+
+# ---- Kernel tuning for a memberlist/ring cluster ---------------------
+- name: Sysctl tuning
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { name: vm.max_map_count, value: "262144" }
+    - { name: net.core.somaxconn, value: "4096" }
+    - { name: fs.file-max, value: "1048576" }

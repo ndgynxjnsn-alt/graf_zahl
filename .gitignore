@@ -1,1 +1,4 @@
 app/target
+
+**/.vagrant/
+*.vdi

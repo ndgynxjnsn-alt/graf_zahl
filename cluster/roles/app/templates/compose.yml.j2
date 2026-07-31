@@ -1,0 +1,43 @@
+# {{ ansible_managed }}
+# Tenant "{{ tenant }}" workload: the Spring app + its local Alloy agent.
+services:
+  alloy:
+    image: {{ versions.alloy }}
+    container_name: alloy
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:{{ ports.alloy_http }}
+      - /etc/alloy/config.alloy
+    volumes:
+      - {{ stack_dir }}/app/config.alloy:/etc/alloy/config.alloy:ro
+
+  app:
+    image: {{ versions.app }}
+    container_name: app
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - alloy
+    environment:
+      ENVIRONMENT: "{{ tenant }}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:{{ ports.alloy_otlp_http }}"
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment={{ tenant }}"
+      OTEL_PYROSCOPE_START_PROFILING: "false"
+      OTEL_PYROSCOPE_ADD_SPAN_NAME: "true"
+      PYROSCOPE_APPLICATION_NAME: "graf-zahl-demo"
+      PYROSCOPE_SERVER_ADDRESS: "http://localhost:{{ ports.alloy_pyroscope_ingest }}"
+      PYROSCOPE_LABELS: "environment={{ tenant }}"
+
+  k6:
+    image: {{ versions.k6 }}
+    container_name: k6
+    network_mode: host
+    restart: unless-stopped
+    command: run /scripts/script.js
+    depends_on:
+      - app
+    volumes:
+      - {{ stack_dir }}/app/k6.js:/scripts/script.js:ro
