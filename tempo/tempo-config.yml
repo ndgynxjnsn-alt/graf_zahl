@@ -46,3 +46,8 @@ overrides:
       processors:
         - service-graphs
         - span-metrics
+
+# Let search see the last seconds too (default cuts off the most recent 30s).
+# trace-pong polls search for near-real-time playback.
+query_frontend:
+  query_end_cutoff: 2s
